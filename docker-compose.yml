@@ -1,0 +1,36 @@
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-handy_notion}
+      POSTGRES_USER: ${POSTGRES_USER:-handy_notion}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes:
+      - handy_notion_db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+  server:
+    build: ./server
+    environment:
+      PORT: 8082
+      DB_POSTGRES: host=db user=${POSTGRES_USER:-handy_notion} password=${POSTGRES_PASSWORD} dbname=${POSTGRES_DB:-handy_notion} port=5432 sslmode=disable TimeZone=Asia/Jakarta
+      AUTH_SERVICE_URL: ${AUTH_SERVICE_URL:-http://host.docker.internal:8081}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5174}
+    ports: ["8082:8082"]
+    depends_on:
+      db: { condition: service_healthy }
+  web:
+    build:
+      context: ./web
+      args:
+        VITE_API_URL: ${PUBLIC_API_URL:-http://localhost:8082}
+        VITE_AUTH_URL: ${PUBLIC_AUTH_URL:-http://localhost:8081}
+    ports: ["5174:80"]
+    depends_on: [server]
+
+volumes:
+  handy_notion_db:
+
