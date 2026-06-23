@@ -20,6 +20,10 @@ let searchTimer
 let hydrating = true
 let selectionRequest = 0
 
+function cloneNote(note) {
+  return JSON.parse(JSON.stringify(note))
+}
+
 const groupedNotes = computed(() => ({
   favorites: notes.value.filter((note) => note.is_favorite),
   recent: notes.value.filter((note) => !note.is_favorite),
@@ -39,7 +43,7 @@ async function loadNotes(preferredId = route.params.id) {
 
 function applySelected(note, navigate = true) {
   hydrating = true
-  selected.value = note ? structuredClone(note) : null
+  selected.value = note ? cloneNote(note) : null
   if (selected.value && (!Array.isArray(selected.value.content) || !selected.value.content.length)) {
     selected.value.content = [{ id: crypto.randomUUID(), type: 'text', text: '' }]
   }
@@ -94,7 +98,7 @@ async function saveNote() {
       is_archived: selected.value.is_archived,
     })
     const index = notes.value.findIndex((note) => note.id === saved.id)
-    if (index >= 0) notes.value[index] = structuredClone(saved)
+    if (index >= 0) notes.value[index] = cloneNote(saved)
     saveState.value = 'Tersimpan'
   } catch (err) { saveState.value = 'Gagal tersimpan'; error.value = err.message }
 }
