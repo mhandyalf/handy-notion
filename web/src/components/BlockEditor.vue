@@ -39,19 +39,18 @@ function cycleType(index) {
 <template>
   <div class="block-editor">
     <div v-for="(block, index) in blocks" :key="block.id" class="block" :class="`block-${block.type}`">
-      <button class="block-handle" :title="`Ubah tipe: ${block.type}`" @click="cycleType(index)">⋮⋮</button>
+      <button class="block-handle" :title="`Change type: ${block.type}`" @click="cycleType(index)">⋮⋮</button>
       <input v-if="block.type === 'todo'" class="todo-check" type="checkbox" :checked="block.checked" @change="update(index, { checked: $event.target.checked })" />
       <span v-if="block.type === 'bullet'" class="bullet">•</span>
       <textarea
         :data-block-index="index"
         :value="block.text"
-        :placeholder="block.type === 'heading' ? 'Judul bagian' : index === 0 ? 'Mulai menulis…' : ''"
+        :placeholder="block.type === 'heading' ? 'Section title' : index === 0 ? 'Start writing…' : ''"
         rows="1"
         @input="update(index, { text: $event.target.value }); $event.target.style.height = 'auto'; $event.target.style.height = `${$event.target.scrollHeight}px`"
         @keydown="keydown($event, index)"
       />
     </div>
-    <button class="add-block" @click="addAfter(blocks.length - 1)">＋ Tambah blok</button>
+    <button class="add-block" @click="addAfter(blocks.length - 1)">＋ Add block</button>
   </div>
 </template>
-

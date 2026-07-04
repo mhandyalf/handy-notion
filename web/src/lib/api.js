@@ -11,11 +11,11 @@ async function request(base, path, options = {}) {
   if (response.status === 401 && base === notesBase) {
     auth.logout()
     window.location.assign('/login')
-    throw new Error('Sesi kamu sudah berakhir')
+    throw new Error('Your session has expired')
   }
   if (response.status === 204) return null
   const data = await response.json().catch(() => ({}))
-  if (!response.ok) throw new Error(data.error || 'Terjadi kesalahan. Coba lagi ya.')
+  if (!response.ok) throw new Error(data.error || 'Something went wrong. Please try again.')
   return data
 }
 

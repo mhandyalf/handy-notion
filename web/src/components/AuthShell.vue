@@ -8,10 +8,10 @@ defineProps({ eyebrow: String, title: String, subtitle: String })
       <a class="brand" href="/"><span class="brand-mark">h</span> handy notes</a>
       <div class="intro-copy">
         <p class="eyebrow">{{ eyebrow }}</p>
-        <h1>Ide yang bagus layak punya <em>ruang bernapas.</em></h1>
-        <p>Catat hal kecil, susun rencana besar, dan temukan semuanya lagi saat kamu membutuhkannya.</p>
+        <h1>Good ideas deserve <em>room to breathe.</em></h1>
+        <p>Capture small thoughts, shape bigger plans, and find everything again when you need it.</p>
       </div>
-      <p class="quote">“Pikiran jadi lebih ringan ketika tidak harus mengingat semuanya.”</p>
+      <p class="quote">“Your mind feels lighter when it does not have to remember everything.”</p>
     </section>
     <section class="auth-panel">
       <div class="auth-card">
@@ -23,4 +23,3 @@ defineProps({ eyebrow: String, title: String, subtitle: String })
     </section>
   </main>
 </template>
-

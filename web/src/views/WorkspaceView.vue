@@ -13,7 +13,7 @@ const search = ref('')
 const archived = ref(false)
 const loading = ref(true)
 const error = ref('')
-const saveState = ref('Tersimpan')
+const saveState = ref('Saved')
 const sidebarOpen = ref(false)
 let saveTimer
 let searchTimer
@@ -60,12 +60,12 @@ async function selectNote(note, navigate = true) {
 
   clearTimeout(saveTimer)
   const requestID = ++selectionRequest
-  saveState.value = 'Memuat…'
+  saveState.value = 'Loading…'
   try {
     const fullNote = await api.getNote(note.id)
     if (requestID !== selectionRequest) return
     applySelected(fullNote, navigate)
-    saveState.value = 'Tersimpan'
+    saveState.value = 'Saved'
   } catch (err) {
     if (requestID === selectionRequest) error.value = err.message
   }
@@ -81,14 +81,14 @@ async function createNote() {
 
 function scheduleSave() {
   if (hydrating || !selected.value) return
-  saveState.value = 'Menunggu…'
+  saveState.value = 'Waiting…'
   clearTimeout(saveTimer)
   saveTimer = setTimeout(saveNote, 650)
 }
 
 async function saveNote() {
   if (!selected.value) return
-  saveState.value = 'Menyimpan…'
+  saveState.value = 'Saving…'
   try {
     const saved = await api.updateNote(selected.value.id, {
       title: selected.value.title,
@@ -99,8 +99,8 @@ async function saveNote() {
     })
     const index = notes.value.findIndex((note) => note.id === saved.id)
     if (index >= 0) notes.value[index] = cloneNote(saved)
-    saveState.value = 'Tersimpan'
-  } catch (err) { saveState.value = 'Gagal tersimpan'; error.value = err.message }
+    saveState.value = 'Saved'
+  } catch (err) { saveState.value = 'Save failed'; error.value = err.message }
 }
 
 async function toggleArchive() {
@@ -112,7 +112,7 @@ async function toggleArchive() {
 }
 
 async function removeNote() {
-  if (!selected.value || !window.confirm(`Hapus permanen “${selected.value.title || 'Untitled'}”?`)) return
+  if (!selected.value || !window.confirm(`Permanently delete “${selected.value.title || 'Untitled'}”?`)) return
   try {
     await api.deleteNote(selected.value.id)
     notes.value = notes.value.filter((note) => note.id !== selected.value.id)
@@ -136,48 +136,48 @@ onBeforeUnmount(() => { clearTimeout(saveTimer); clearTimeout(searchTimer) })
         <a class="brand compact" href="/notes"><span class="brand-mark">h</span> handy notes</a>
         <button class="icon-button mobile-only" @click="sidebarOpen = false">×</button>
       </div>
-      <button class="new-note" @click="createNote"><span>＋</span> Catatan baru <kbd>⌘ N</kbd></button>
-      <label class="search-box"><span>⌕</span><input v-model="search" placeholder="Cari catatan…" /></label>
+      <button class="new-note" @click="createNote"><span>＋</span> New note <kbd>⌘ N</kbd></button>
+      <label class="search-box"><span>⌕</span><input v-model="search" placeholder="Search notes…" /></label>
       <nav class="note-nav">
         <template v-if="!loading && notes.length">
           <section v-if="groupedNotes.favorites.length">
-            <p class="nav-label">Favorit</p>
-            <button v-for="note in groupedNotes.favorites" :key="note.id" :class="{ active: selected?.id === note.id }" @click="selectNote(note)"><span>{{ note.icon }}</span><span class="note-link-copy"><strong>{{ note.title || 'Untitled' }}</strong><small>{{ new Date(note.updated_at).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' }) }}</small></span></button>
+            <p class="nav-label">Favorites</p>
+            <button v-for="note in groupedNotes.favorites" :key="note.id" :class="{ active: selected?.id === note.id }" @click="selectNote(note)"><span>{{ note.icon }}</span><span class="note-link-copy"><strong>{{ note.title || 'Untitled' }}</strong><small>{{ new Date(note.updated_at).toLocaleDateString('en-US', { day: 'numeric', month: 'short' }) }}</small></span></button>
           </section>
           <section>
-            <p class="nav-label">{{ archived ? 'Arsip' : 'Terbaru' }}</p>
-            <button v-for="note in groupedNotes.recent" :key="note.id" :class="{ active: selected?.id === note.id }" @click="selectNote(note)"><span>{{ note.icon }}</span><span class="note-link-copy"><strong>{{ note.title || 'Untitled' }}</strong><small>{{ new Date(note.updated_at).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' }) }}</small></span></button>
+            <p class="nav-label">{{ archived ? 'Archive' : 'Recent' }}</p>
+            <button v-for="note in groupedNotes.recent" :key="note.id" :class="{ active: selected?.id === note.id }" @click="selectNote(note)"><span>{{ note.icon }}</span><span class="note-link-copy"><strong>{{ note.title || 'Untitled' }}</strong><small>{{ new Date(note.updated_at).toLocaleDateString('en-US', { day: 'numeric', month: 'short' }) }}</small></span></button>
           </section>
         </template>
-        <p v-else-if="loading" class="empty-nav">Memuat catatan…</p>
-        <p v-else class="empty-nav">Belum ada catatan di sini.</p>
+        <p v-else-if="loading" class="empty-nav">Loading notes…</p>
+        <p v-else class="empty-nav">No notes here yet.</p>
       </nav>
       <div class="sidebar-bottom">
-        <button :class="{ active: archived }" @click="archived = !archived"><span>▱</span>{{ archived ? 'Kembali ke catatan' : 'Arsip' }}</button>
-        <button @click="logout"><span>↗</span>Keluar</button>
+        <button :class="{ active: archived }" @click="archived = !archived"><span>▱</span>{{ archived ? 'Back to notes' : 'Archive' }}</button>
+        <button @click="logout"><span>↗</span>Log out</button>
       </div>
     </aside>
 
     <section class="editor-shell">
       <header class="editor-toolbar">
         <button class="icon-button mobile-only" @click="sidebarOpen = true">☰</button>
-        <div class="breadcrumbs"><span>Catatan</span><b>/</b><strong>{{ selected?.title || 'Kosong' }}</strong></div>
+        <div class="breadcrumbs"><span>Notes</span><b>/</b><strong>{{ selected?.title || 'Empty' }}</strong></div>
         <div v-if="selected" class="toolbar-actions">
-          <span class="save-state"><i :class="{ saving: saveState !== 'Tersimpan' }"></i>{{ saveState }}</span>
-          <button class="icon-button" :class="{ starred: selected.is_favorite }" title="Favorit" @click="selected.is_favorite = !selected.is_favorite">☆</button>
-          <button class="text-button" @click="toggleArchive">{{ selected.is_archived ? 'Pulihkan' : 'Arsipkan' }}</button>
-          <button v-if="selected.is_archived" class="icon-button danger" title="Hapus permanen" @click="removeNote">⌫</button>
+          <span class="save-state"><i :class="{ saving: saveState !== 'Saved' }"></i>{{ saveState }}</span>
+          <button class="icon-button" :class="{ starred: selected.is_favorite }" title="Favorite" @click="selected.is_favorite = !selected.is_favorite">☆</button>
+          <button class="text-button" @click="toggleArchive">{{ selected.is_archived ? 'Restore' : 'Archive' }}</button>
+          <button v-if="selected.is_archived" class="icon-button danger" title="Delete permanently" @click="removeNote">⌫</button>
         </div>
       </header>
 
       <p v-if="error" class="app-error" @click="error = ''">{{ error }} <span>×</span></p>
       <article v-if="selected" :key="selected.id" class="document">
-        <button class="page-icon" title="Ganti ikon" @click="selected.icon = selected.icon === '📝' ? '💡' : selected.icon === '💡' ? '📌' : '📝'">{{ selected.icon }}</button>
+        <button class="page-icon" title="Change icon" @click="selected.icon = selected.icon === '📝' ? '💡' : selected.icon === '💡' ? '📌' : '📝'">{{ selected.icon }}</button>
         <textarea v-model="selected.title" class="title-input" rows="1" placeholder="Untitled" @input="$event.target.style.height = 'auto'; $event.target.style.height = `${$event.target.scrollHeight}px`" />
-        <div class="document-meta"><span>Terakhir diubah {{ new Date(selected.updated_at).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' }) }}</span><span>•</span><span>{{ selected.content.length }} blok</span></div>
+        <div class="document-meta"><span>Last edited {{ new Date(selected.updated_at).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' }) }}</span><span>•</span><span>{{ selected.content.length }} {{ selected.content.length === 1 ? 'block' : 'blocks' }}</span></div>
         <BlockEditor :key="selected.id" v-model:blocks="selected.content" />
       </article>
-      <div v-else-if="!loading" class="empty-document"><span>✦</span><h2>Ruang untuk ide berikutnya</h2><p>Buat catatan baru dan mulai dari satu kalimat kecil.</p><button class="primary-button" @click="createNote">Buat catatan</button></div>
+      <div v-else-if="!loading" class="empty-document"><span>✦</span><h2>A space for your next idea</h2><p>Create a new note and start with one small sentence.</p><button class="primary-button" @click="createNote">Create note</button></div>
     </section>
   </main>
 </template>

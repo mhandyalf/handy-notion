@@ -24,14 +24,13 @@ async function submit() {
 </script>
 
 <template>
-  <AuthShell eyebrow="Selamat datang kembali" title="Masuk ke ruangmu" subtitle="Lanjutkan dari tempat terakhir kamu berhenti.">
+  <AuthShell eyebrow="Welcome back" title="Sign in to your space" subtitle="Pick up right where you left off.">
     <form class="auth-form" @submit.prevent="submit">
-      <label>Username<input v-model.trim="username" required autocomplete="username" placeholder="username kamu" /></label>
+      <label>Username<input v-model.trim="username" required autocomplete="username" placeholder="your username" /></label>
       <label>Password<input v-model="password" required type="password" autocomplete="current-password" placeholder="••••••••" /></label>
       <p v-if="error" class="form-error">{{ error }}</p>
-      <button class="primary-button" :disabled="busy">{{ busy ? 'Sebentar…' : 'Masuk' }}</button>
+      <button class="primary-button" :disabled="busy">{{ busy ? 'Signing in…' : 'Sign in' }}</button>
     </form>
-    <p class="auth-switch">Belum punya akun? <RouterLink to="/register">Buat akun</RouterLink></p>
+    <p class="auth-switch">Do not have an account? <RouterLink to="/register">Create one</RouterLink></p>
   </AuthShell>
 </template>
-
