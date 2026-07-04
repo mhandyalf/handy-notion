@@ -1,7 +1,7 @@
 import { auth } from './auth.js'
 
-const notesBase = import.meta.env.VITE_API_URL || 'http://localhost:8082'
-const authBase = import.meta.env.VITE_AUTH_URL || 'http://localhost:8081'
+const notesBase = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://localhost:8082' : '')
+const authBase = import.meta.env.VITE_AUTH_URL || (import.meta.env.DEV ? 'http://localhost:8081' : '')
 
 async function request(base, path, options = {}) {
   const headers = { 'Content-Type': 'application/json', ...options.headers }
