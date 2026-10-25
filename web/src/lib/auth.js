@@ -1,6 +1,12 @@
 const tokenKey = 'handy_access_token'
 
 export const auth = {
+  userID() {
+    try {
+      const token = this.token()
+      return JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))).user_id || null
+    } catch { return null }
+  },
   token: () => localStorage.getItem(tokenKey),
   setToken: (token) => localStorage.setItem(tokenKey, token),
   logout: () => localStorage.removeItem(tokenKey),
