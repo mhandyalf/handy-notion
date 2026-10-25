@@ -2,6 +2,7 @@
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router'
 import BlockEditor from '../components/BlockEditor.vue'
+import NoteShare from '../components/NoteShare.vue'
 import { useWorkspaceNotes } from '../composables/useWorkspaceNotes.js'
 import { api } from '../lib/api.js'
 import { auth } from '../lib/auth.js'
@@ -216,6 +217,7 @@ onBeforeUnmount(() => {
         <button ref="menuButton" class="icon-button mobile-only" aria-label="Open notes sidebar" aria-controls="notes-sidebar" :aria-expanded="sidebarOpen" @click="sidebarOpen = true">☰</button>
         <div class="breadcrumbs"><span>{{ selected?.is_archived ? 'Archive' : 'Notes' }}</span><b aria-hidden="true">/</b><strong>{{ selected ? selected.title || 'Untitled' : 'No note selected' }}</strong></div>
         <div v-if="selected" class="toolbar-actions">
+          <NoteShare :key="selected.id" :note-id="selected.id" :flush="flush" :blocked="busy || conflict || selected.is_archived" />
           <span class="save-state" role="status" aria-live="polite" aria-atomic="true"><i aria-hidden="true" :class="{ saving: saveState !== 'Saved' }"></i>{{ saveState }}</span>
           <button v-if="saveState === 'Save failed' || saveState === 'Recovered draft'" class="text-button" @click="flush">Retry save</button>
           <button class="icon-button" :class="{ starred: selected.is_favorite }" :aria-label="selected.is_favorite ? 'Remove from favorites' : 'Add to favorites'" :aria-pressed="selected.is_favorite" title="Favorite" @click="selected.is_favorite = !selected.is_favorite">☆</button>

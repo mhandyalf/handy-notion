@@ -1,4 +1,5 @@
 import { auth } from './auth.js'
+import { fetchPublicNote } from './publicNote.js'
 
 const notesBase = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://localhost:8082' : '')
 const authBase = import.meta.env.VITE_AUTH_URL || (import.meta.env.DEV ? 'http://localhost:8081' : '')
@@ -29,6 +30,10 @@ export const api = {
   register: (payload) => request(authBase, '/api/register', { method: 'POST', body: JSON.stringify(payload) }),
   listNotes: (archived = false, query = '') => request(notesBase, `/api/notes?archived=${archived}&q=${encodeURIComponent(query)}`),
   getNote: (id) => request(notesBase, `/api/notes/${id}`),
+  getShare: (id) => request(notesBase, `/api/notes/${id}/share`),
+  enableShare: (id) => request(notesBase, `/api/notes/${id}/share`, { method: 'POST' }),
+  revokeShare: (id) => request(notesBase, `/api/notes/${id}/share`, { method: 'DELETE' }),
+  getPublicNote: (token, signal) => fetchPublicNote(notesBase, token, signal),
   createNote: () => request(notesBase, '/api/notes', { method: 'POST', body: JSON.stringify({ content: [{ id: crypto.randomUUID(), type: 'text', text: '' }] }) }),
   updateNote: (id, payload) => request(notesBase, `/api/notes/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),
   deleteNote: (id, version) => request(notesBase, `/api/notes/${id}?expected_updated_at=${encodeURIComponent(version)}`, { method: 'DELETE' }),

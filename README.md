@@ -63,7 +63,22 @@ Autosave writes are serialized. Switching pages and leaving the workspace flush 
 
 Unsaved drafts are copied to user-scoped `sessionStorage` when available. Reloading the same tab and opening that page restores the draft for review; a successful save removes that recovery copy. Closing the tab clears session storage, and browsers may not display unload warnings in every situation. This is not an offline sync system or a backup. Recovered drafts retain their original base timestamp so that an older recovery copy cannot silently overwrite newer server changes.
 
-## Concurrent editing protection
+## Public read-only sharing
+
+Open a note and choose **Share → Enable public link**, then **Copy link**. The page at `/s/<random-token>` is readable without login. Anyone who receives or forwards this link can read the note; it is not a private invitation, searchable public directory, or collaborative editor.
+
+- Notes are private by default. Only the owner can enable, inspect, or revoke sharing. Enabling first saves pending edits; save errors/conflicts block enabling. Sharing status does not change the note concurrency version.
+- Links display the latest saved title, icon and blocks, not an immutable snapshot. Future saved edits are public too. Viewers refresh to see updates; local unsaved drafts are not published.
+- **Revoke link** immediately blocks subsequent API reads. Enabling again creates a different link. Already loaded/downloaded/copied content cannot be recalled.
+- Archived/deleted notes are unavailable publicly. Restoring an archived note reactivates its existing link unless it was revoked. Revoke before archiving if access must stay disabled after restoration.
+- Anonymous responses omit note IDs, owner IDs, favorites, sharing tokens, and private metadata. Text is rendered using Vue escaping, never as HTML. There are no public edit endpoints.
+- The API uses `no-store` and `noindex` headers; the public page requests no indexing. These are best-effort instructions, not protection against screenshots, crawlers ignoring instructions, or forwarded links.
+
+Deployment adds a `note_shares` table via the existing startup AutoMigrate flow. Back up and test restore before rollout; do not drop this table on rollback unless intentionally revoking every link. Deploy the backend before enabling the new UI. Configure the web server for SPA fallback on `/s/*`, HTTPS, and no caching of public API responses. Treat public URLs/tokens as secrets: redact `/s/*`, `/api/public/notes/*`, and share-management response bodies from access/analytics logs. Do not add third-party analytics to public pages. Apply normal public endpoint rate limits at the reverse proxy.
+
+Before release, test owner enable/copy/revoke, opening in a logged-out/private browser, all four block types and multiline text, literal HTML displayed as text, updated saved content after refresh, old links after revocation/re-enable, archived/deleted notes, mobile layout, and keyboard access. API integration tests cover permissions, lifecycle, metadata allowlisting, and concurrent enable; they do not replace browser checks.
+
+## Concurrent editing API details
 
 Updates require `expected_updated_at` in the PUT JSON body; deletes require it as a URL-encoded query parameter. Use the exact `updated_at` returned by the last successful create, fetch, or save. The database checks ownership and timestamp in the same mutation and returns the exact saved row. Missing preconditions return HTTP 428, malformed timestamps return 400, and stale/missing/deleted/unowned rows return 409 with `code: "note_conflict"`. No schema migration or new dependency is required.
 
