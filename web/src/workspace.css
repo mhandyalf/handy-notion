@@ -1,0 +1,65 @@
+.workspace .sidebar-caption {
+  margin: 3px 7px 0;
+  color: #777269;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.workspace .sidebar { height: 100dvh; }
+.workspace .note-nav { min-height: 0; }
+.workspace .sidebar-bottom { flex-shrink: 0; }
+.workspace .new-note kbd { white-space: nowrap; }
+.workspace .search-box kbd { font-size: 10px; white-space: nowrap; }
+.workspace .search-box:focus-within { outline: 2px solid #a79177; outline-offset: 1px; }
+.workspace .empty-nav { overflow-wrap: anywhere; color: #777269; }
+.workspace .empty-nav strong { color: var(--ink); font-weight: 600; }
+.workspace .empty-nav p { margin: 6px 0 12px; }
+.workspace .empty-nav .clear-search {
+  width: auto;
+  padding: 6px 9px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+  font-size: 12px;
+}
+.workspace .breadcrumbs > span { flex-shrink: 0; }
+.workspace .toolbar-actions { flex-shrink: 0; }
+.workspace .save-state { white-space: nowrap; color: #716b61; }
+.workspace .document-meta { flex-wrap: wrap; line-height: 1.6; }
+.workspace .app-error { display: flex; align-items: flex-start; gap: 8px; cursor: default; }
+.workspace .app-error .icon-button { flex-shrink: 0; height: 24px; width: 24px; }
+.workspace .empty-document { padding: 32px 24px; }
+.workspace :is(button, a, textarea):focus-visible { outline: 2px solid #9e7051; outline-offset: 3px; }
+.workspace button:disabled { cursor: not-allowed; opacity: .55; }
+.workspace .sidebar-backdrop { display: none; }
+
+@media (max-width: 760px) {
+  .workspace .sidebar-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 25;
+    border: 0;
+    padding: 0;
+    background: rgba(39, 38, 33, .35);
+    cursor: default;
+  }
+  .workspace .sidebar { top: 0; padding-bottom: max(12px, env(safe-area-inset-bottom)); }
+  .workspace .editor-toolbar { height: auto; min-height: 64px; flex-wrap: wrap; gap: 8px; padding: 10px 12px; }
+  .workspace .editor-toolbar > .icon-button { width: 36px; height: 36px; }
+  .workspace .breadcrumbs { display: flex; flex: 1; }
+  .workspace .toolbar-actions { width: 100%; flex-wrap: wrap; gap: 6px; }
+  .workspace .save-state { display: inline-flex; margin-right: auto; min-height: 32px; }
+  .workspace .toolbar-actions .icon-button { width: 36px; height: 36px; }
+  .workspace .toolbar-actions .text-button { min-height: 36px; }
+  .workspace .sidebar .icon-button { width: 40px; height: 40px; }
+  .workspace .sidebar-bottom button { min-height: 40px; }
+  .workspace .note-nav > section > button { min-height: 40px; }
+  .workspace .document { padding-top: 36px; }
+  .workspace .app-error { left: 12px; right: 12px; top: 120px; max-width: none; }
+  .workspace .empty-document { min-height: 65dvh; height: auto; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .workspace .sidebar { transition: none; }
+  .workspace .save-state i.saving { animation: none; }
+}
