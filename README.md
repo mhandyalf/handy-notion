@@ -65,6 +65,27 @@ Unsaved drafts are copied to user-scoped `sessionStorage` when available. Reload
 
 ## Public read-only sharing
 
+### VPS automatic image updates
+
+The VPS uses `/etc/systemd/system/handy-notion-update.timer` to check Docker Hub approximately every five minutes. Its service executes `/usr/local/sbin/handy-notion-auto-update` (source: `deploy/auto-update.sh`), targeting only `api` and `web` in `/myproject/handy-notion/docker-compose.prod.yml`. Other applications and the PostgreSQL container are not restarted.
+
+Only `main` publishes production images. Both API and web images must carry the same 40-character `org.opencontainers.image.revision`; unlabelled or mismatched images are skipped. The deployment pins the exact downloaded image IDs rather than mutable tags. Production builds use same-origin API/auth URLs so both configured domains can work. Feature-branch pushes do not deploy.
+
+Before a changed pair is deployed, the updater creates a root-only compressed `pg_dumpall` of the shared PostgreSQL cluster under `/var/backups/handy-notion/`. A failed dump blocks deployment. Backups contain sensitive data: arrange encrypted off-host copies, monitor disk capacity, and manage retention manually; this script does not delete backups or old images. A successful dump/gzip check is **not** proof of a successful restore; the restore release gate remains open.
+
+Deployment recreates only the two Notes containers, causing a brief interruption. Failed HTTP checks trigger an attempt to restore the prior image IDs, **not** the database; incompatible schema migrations, process termination, or host failures can still require manual recovery. `/health` and web HTTP checks do not replace authenticated end-to-end checks. Monitor failed service runs; no external alerting is configured.
+
+Host commands:
+
+```sh
+systemctl list-timers --all handy-notion-update.timer
+journalctl -u handy-notion-update.service -n 80 --no-pager
+systemctl start handy-notion-update.service # Check now
+systemctl disable --now handy-notion-update.timer # Pause future checks
+```
+
+Pausing the timer does not interrupt an update already running. Unit files and script are versioned under `deploy/`; changes there must be installed on the host explicitly. The timer does not pull Git changes or update itself.
+
 Open a note and choose **Share → Enable public link**, then **Copy link**. The page at `/s/<random-token>` is readable without login. Anyone who receives or forwards this link can read the note; it is not a private invitation, searchable public directory, or collaborative editor.
 
 - Notes are private by default. Only the owner can enable, inspect, or revoke sharing. Enabling first saves pending edits; save errors/conflicts block enabling. Sharing status does not change the note concurrency version.
