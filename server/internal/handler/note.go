@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -15,7 +16,15 @@ import (
 	"gorm.io/gorm"
 )
 
-type NoteHandler struct{ notes *repository.NoteRepository }
+type noteRepository interface {
+	List(uuid.UUID, bool, string) ([]model.Note, error)
+	Get(uuid.UUID, uuid.UUID) (*model.Note, error)
+	Create(*model.Note) error
+	Update(uuid.UUID, uuid.UUID, time.Time, map[string]any) (*model.Note, error)
+	Delete(uuid.UUID, uuid.UUID, time.Time) error
+}
+
+type NoteHandler struct{ notes noteRepository }
 
 type noteInput struct {
 	Title      *string         `json:"title"`
@@ -74,13 +83,28 @@ func (h *NoteHandler) Create(c *gin.Context) {
 }
 
 func (h *NoteHandler) Update(c *gin.Context) {
-	note, ok := h.ownedNote(c)
-	if !ok {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid note id"})
 		return
 	}
-	var input noteInput
+	var input struct {
+		noteInput
+		ExpectedUpdatedAt json.RawMessage `json:"expected_updated_at"`
+	}
 	if err := c.ShouldBindJSON(&input); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid note"})
+		return
+	}
+	var token string
+	if len(input.ExpectedUpdatedAt) > 0 {
+		if err := json.Unmarshal(input.ExpectedUpdatedAt, &token); err != nil || string(input.ExpectedUpdatedAt) == "null" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid expected_updated_at"})
+			return
+		}
+	}
+	expected, ok := expectedTimestamp(c, token, len(input.ExpectedUpdatedAt) > 0)
+	if !ok {
 		return
 	}
 	updates := map[string]any{}
@@ -111,20 +135,37 @@ func (h *NoteHandler) Update(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "no fields to update"})
 		return
 	}
-	if err := h.notes.Update(note, updates); err != nil {
+	note, err := h.notes.Update(userID(c), id, expected, updates)
+	if errors.Is(err, repository.ErrNoteConflict) {
+		noteConflict(c)
+		return
+	}
+	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save note"})
 		return
 	}
-	fresh, _ := h.notes.Get(userID(c), note.ID)
-	c.JSON(http.StatusOK, fresh)
+	c.JSON(http.StatusOK, note)
 }
 
 func (h *NoteHandler) Delete(c *gin.Context) {
-	note, ok := h.ownedNote(c)
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid note id"})
+		return
+	}
+	query := c.Request.URL.Query()
+	token := query.Get("expected_updated_at")
+	_, present := query["expected_updated_at"]
+	expected, ok := expectedTimestamp(c, token, present)
 	if !ok {
 		return
 	}
-	if err := h.notes.Delete(note); err != nil {
+	err = h.notes.Delete(userID(c), id, expected)
+	if errors.Is(err, repository.ErrNoteConflict) {
+		noteConflict(c)
+		return
+	}
+	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete note"})
 		return
 	}
@@ -147,6 +188,23 @@ func (h *NoteHandler) ownedNote(c *gin.Context) (*model.Note, bool) {
 		return nil, false
 	}
 	return note, true
+}
+
+func noteConflict(c *gin.Context) {
+	c.JSON(http.StatusConflict, gin.H{"error": "note has changed; reload before retrying", "code": "note_conflict"})
+}
+
+func expectedTimestamp(c *gin.Context, token string, present bool) (time.Time, bool) {
+	if !present {
+		c.JSON(http.StatusPreconditionRequired, gin.H{"error": "expected_updated_at is required"})
+		return time.Time{}, false
+	}
+	expected, err := time.Parse(time.RFC3339Nano, token)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "expected_updated_at must be an RFC3339Nano timestamp"})
+		return time.Time{}, false
+	}
+	return expected, true
 }
 
 func validBlocks(raw json.RawMessage) bool {

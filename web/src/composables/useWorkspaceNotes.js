@@ -15,6 +15,7 @@ export function useWorkspaceNotes(api, { navigate = () => {}, delay = 650, stora
   const error = ref('')
   const saveState = ref('Saved')
   const dirty = ref(false)
+  const conflict = ref(false)
   let hydrating = false
   let revision = 0
   let timer
@@ -51,12 +52,15 @@ export function useWorkspaceNotes(api, { navigate = () => {}, delay = 650, stora
       selected.value.content = [{ id: crypto.randomUUID(), type: 'text', text: '' }]
     }
     dirty.value = false
+    conflict.value = false
     saveState.value = 'Saved'
     hydrating = false
     const recovered = note && recoveryDrafts()?.[note.id]
     if (recovered && recovered.id === note.id && Array.isArray(recovered.content)) {
       hydrating = true
       selected.value = { ...selected.value, ...payload(recovered) }
+      // A recovered draft must retain its original base, not silently adopt the server's version.
+      selected.value.updated_at = recovered.updated_at || null
       hydrating = false
       revision++
       dirty.value = true
@@ -70,33 +74,46 @@ export function useWorkspaceNotes(api, { navigate = () => {}, delay = 650, stora
     revision++
     dirty.value = true
     persistDraft(selected.value)
-    saveState.value = 'Waiting…'
     clearTimeout(timer)
-    timer = setTimeout(() => { void flush() }, delay)
+    saveState.value = conflict.value ? 'Conflict' : 'Waiting…'
+    if (!conflict.value) timer = setTimeout(() => { void flush() }, delay)
   }, { deep: true, flush: 'sync' })
 
   async function drain() {
+    if (conflict.value) return false
+    if (dirty.value && !selected.value?.updated_at) {
+      conflict.value = true
+      saveState.value = 'Conflict'
+      error.value = 'This draft has no base version. Download it before loading the server version.'
+      return false
+    }
     while (dirty.value && selected.value) {
       const id = selected.value.id
       const version = revision
       const snapshot = payload(selected.value)
+      snapshot.expected_updated_at = selected.value.updated_at
       saveState.value = 'Saving…'
       try {
         const saved = await api.updateNote(id, snapshot)
         if (disposed) return true
         const index = notes.value.findIndex((note) => note.id === id)
         if (index >= 0) notes.value[index] = clone(saved)
-        if (selected.value?.id === id && revision === version) {
+        if (selected.value?.id === id) {
           hydrating = true
           selected.value.updated_at = saved.updated_at
           hydrating = false
+          if (revision !== version) {
+            persistDraft(selected.value)
+            continue
+          }
           dirty.value = false
           persistDraft({ id }, true)
           saveState.value = 'Saved'
         }
       } catch (err) {
         error.value = err.message
-        saveState.value = 'Save failed'
+        conflict.value = err.status === 409 || err.status === 428
+        saveState.value = conflict.value ? 'Conflict' : 'Save failed'
         return false
       }
     }
@@ -186,7 +203,16 @@ export function useWorkspaceNotes(api, { navigate = () => {}, delay = 650, stora
     return transition(async () => {
       if (!selected.value) return false
       const id = selected.value.id
-      await api.deleteNote(id)
+      try {
+        await api.deleteNote(id, selected.value.updated_at)
+      } catch (err) {
+        if (err.status === 409 || err.status === 428) {
+          conflict.value = true
+          saveState.value = 'Conflict'
+          persistDraft(selected.value)
+        }
+        throw err
+      }
       clearTimeout(timer)
       persistDraft({ id }, true)
       notes.value = notes.value.filter((note) => note.id !== id)
@@ -202,6 +228,27 @@ export function useWorkspaceNotes(api, { navigate = () => {}, delay = 650, stora
     stopWatch()
   }
 
-  return { notes, selected, search, archived, loading, busy, error, saveState, dirty,
-    groupedNotes, flush, loadNotes, initialize, selectNote, createNote, toggleArchive, removeNote, dispose }
+  async function reloadServerNote() {
+    if (busy.value || saving || !selected.value) return false
+    busy.value = true
+    clearTimeout(timer)
+    try {
+      const version = revision
+      const fresh = await api.getNote(selected.value.id)
+      if (revision !== version) {
+        error.value = 'The local draft changed while loading. Download it and try loading again.'
+        return false
+      }
+      persistDraft({ id: fresh.id }, true)
+      applySelected(fresh)
+      error.value = ''
+      return true
+    } catch (err) {
+      error.value = err.message
+      return false
+    } finally { busy.value = false }
+  }
+
+  return { notes, selected, search, archived, loading, busy, error, saveState, dirty, conflict,
+    groupedNotes, flush, loadNotes, initialize, selectNote, createNote, toggleArchive, removeNote, reloadServerNote, dispose }
 }

@@ -29,7 +29,22 @@ const workspace = useWorkspaceNotes(api, {
   recoveryKey: userID ? `handy-notion:drafts:${userID}` : null,
 })
 const { notes, selected, search, archived, loading, busy, error, saveState, dirty,
-  groupedNotes, flush, loadNotes, toggleArchive } = workspace
+  groupedNotes, flush, loadNotes, toggleArchive, conflict } = workspace
+
+function downloadDraft() {
+  const url = URL.createObjectURL(new Blob([JSON.stringify(selected.value, null, 2)], { type: 'application/json' }))
+  const link = document.createElement('a')
+  link.href = url
+  link.download = `note-${selected.value.id}-draft.json`
+  link.click()
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
+}
+
+async function reloadServerNote() {
+  if (window.confirm('Replace this local draft with the latest server version? Download your draft first if you want to keep it.')) {
+    await workspace.reloadServerNote()
+  }
+}
 
 async function createNote() {
   if (await workspace.createNote()) {
@@ -210,6 +225,11 @@ onBeforeUnmount(() => {
       </header>
 
       <div v-if="error" class="app-error" role="alert">{{ error }} <button class="icon-button" aria-label="Dismiss error" @click="error = ''">×</button></div>
+      <div v-if="conflict" class="app-error" role="alert">
+        <div><strong>This note changed elsewhere.</strong> Automatic saving is paused. Your local draft is still here; download it before loading the server version. No changes will be overwritten automatically.</div>
+        <button class="text-button" @click="downloadDraft">Download local draft</button>
+        <button class="text-button" :disabled="busy" @click="reloadServerNote">Load server version</button>
+      </div>
       <article v-if="selected" :key="selected.id" class="document">
         <button class="page-icon" aria-label="Change note icon" title="Change icon" @click="selected.icon = selected.icon === '📝' ? '💡' : selected.icon === '💡' ? '📌' : '📝'">{{ selected.icon }}</button>
         <textarea ref="titleInput" v-model="selected.title" class="title-input" aria-label="Note title" rows="1" placeholder="Untitled" @input="resizeTitle" />
