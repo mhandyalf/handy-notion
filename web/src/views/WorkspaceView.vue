@@ -1,152 +1,88 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router'
 import BlockEditor from '../components/BlockEditor.vue'
+import { useWorkspaceNotes } from '../composables/useWorkspaceNotes.js'
 import { api } from '../lib/api.js'
 import { auth } from '../lib/auth.js'
 
 const route = useRoute()
 const router = useRouter()
-const notes = ref([])
-const selected = ref(null)
-const search = ref('')
-const archived = ref(false)
-const loading = ref(true)
-const error = ref('')
-const saveState = ref('Saved')
 const sidebarOpen = ref(false)
-let saveTimer
 let searchTimer
-let hydrating = true
-let selectionRequest = 0
+let recoveryStorage
+try { recoveryStorage = window.sessionStorage } catch { /* Browser storage may be disabled. */ }
+const userID = auth.userID()
+const workspace = useWorkspaceNotes(api, {
+  navigate: (path) => router.replace(path),
+  storage: recoveryStorage,
+  recoveryKey: userID ? `handy-notion:drafts:${userID}` : null,
+})
+const { notes, selected, search, archived, loading, busy, error, saveState, dirty,
+  groupedNotes, flush, loadNotes, createNote, toggleArchive } = workspace
 
-function cloneNote(note) {
-  return JSON.parse(JSON.stringify(note))
-}
-
-const groupedNotes = computed(() => ({
-  favorites: notes.value.filter((note) => note.is_favorite),
-  recent: notes.value.filter((note) => !note.is_favorite),
-}))
-
-async function loadNotes(preferredId = route.params.id) {
-  loading.value = true
-  error.value = ''
-  try {
-    const data = await api.listNotes(archived.value, search.value)
-    notes.value = data.notes || []
-    const match = notes.value.find((note) => note.id === preferredId)
-    applySelected(match || notes.value[0] || null, false)
-  } catch (err) { error.value = err.message }
-  finally { loading.value = false }
-}
-
-function applySelected(note, navigate = true) {
-  hydrating = true
-  selected.value = note ? cloneNote(note) : null
-  if (selected.value && (!Array.isArray(selected.value.content) || !selected.value.content.length)) {
-    selected.value.content = [{ id: crypto.randomUUID(), type: 'text', text: '' }]
-  }
-  if (navigate && note) router.replace(`/notes/${note.id}`)
-  sidebarOpen.value = false
-  setTimeout(() => { hydrating = false }, 0)
-}
-
-async function selectNote(note, navigate = true) {
-  if (!note) {
-    applySelected(null, navigate)
-    return
-  }
-
-  clearTimeout(saveTimer)
-  const requestID = ++selectionRequest
-  saveState.value = 'Loading…'
-  try {
-    const fullNote = await api.getNote(note.id)
-    if (requestID !== selectionRequest) return
-    applySelected(fullNote, navigate)
-    saveState.value = 'Saved'
-  } catch (err) {
-    if (requestID === selectionRequest) error.value = err.message
-  }
-}
-
-async function createNote() {
-  try {
-    const note = await api.createNote()
-    notes.value.unshift(note)
-    applySelected(note)
-  } catch (err) { error.value = err.message }
-}
-
-function scheduleSave() {
-  if (hydrating || !selected.value) return
-  saveState.value = 'Waiting…'
-  clearTimeout(saveTimer)
-  saveTimer = setTimeout(saveNote, 650)
-}
-
-async function saveNote() {
-  if (!selected.value) return
-  saveState.value = 'Saving…'
-  try {
-    const saved = await api.updateNote(selected.value.id, {
-      title: selected.value.title,
-      content: selected.value.content,
-      icon: selected.value.icon,
-      is_favorite: selected.value.is_favorite,
-      is_archived: selected.value.is_archived,
-    })
-    const index = notes.value.findIndex((note) => note.id === saved.id)
-    if (index >= 0) notes.value[index] = cloneNote(saved)
-    saveState.value = 'Saved'
-  } catch (err) { saveState.value = 'Save failed'; error.value = err.message }
-}
-
-async function toggleArchive() {
-  if (!selected.value) return
-  selected.value.is_archived = !selected.value.is_archived
-  await saveNote()
-  notes.value = notes.value.filter((note) => note.id !== selected.value.id)
-  applySelected(notes.value[0] || null)
+async function selectNote(note) {
+  if (await workspace.selectNote(note)) sidebarOpen.value = false
 }
 
 async function removeNote() {
-  if (!selected.value || !window.confirm(`Permanently delete “${selected.value.title || 'Untitled'}”?`)) return
-  try {
-    await api.deleteNote(selected.value.id)
-    notes.value = notes.value.filter((note) => note.id !== selected.value.id)
-    applySelected(notes.value[0] || null)
-  } catch (err) { error.value = err.message }
+  if (selected.value && window.confirm(`Delete “${selected.value.title || 'Untitled'}”?`)) {
+    await workspace.removeNote()
+  }
 }
 
-function logout() { auth.logout(); router.push('/login') }
+async function logout() {
+  if (busy.value) return
+  if (!await flush()) return
+  auth.logout()
+  await router.push('/login')
+}
 
-watch(selected, scheduleSave, { deep: true })
-watch(search, () => { clearTimeout(searchTimer); searchTimer = setTimeout(() => loadNotes(), 300) })
-watch(archived, () => loadNotes())
-onMounted(loadNotes)
-onBeforeUnmount(() => { clearTimeout(saveTimer); clearTimeout(searchTimer) })
+function beforeUnload(event) {
+  if (!dirty.value) return
+  event.preventDefault()
+  event.returnValue = ''
+}
+
+onBeforeRouteLeave(() => busy.value ? false : flush())
+onBeforeRouteUpdate(async (to) => {
+  if (to.params.id === selected.value?.id || (!to.params.id && !selected.value)) return true
+  return workspace.selectNote(to.params.id ? { id: to.params.id } : null, false)
+})
+watch(search, () => {
+  clearTimeout(searchTimer)
+  searchTimer = setTimeout(loadNotes, 300)
+})
+watch(archived, () => { void loadNotes() })
+onMounted(() => {
+  window.addEventListener('beforeunload', beforeUnload)
+  void workspace.initialize(route.params.id)
+})
+onBeforeUnmount(() => {
+  clearTimeout(searchTimer)
+  window.removeEventListener('beforeunload', beforeUnload)
+  workspace.dispose()
+})
 </script>
 
 <template>
   <main class="workspace">
     <aside class="sidebar" :class="{ open: sidebarOpen }">
       <div class="sidebar-top">
-        <a class="brand compact" href="/notes"><span class="brand-mark">h</span> handy notes</a>
+        <a class="brand compact" href="/notes" @click.prevent="selectNote(null)"><span class="brand-mark">h</span> handy notes</a>
         <button class="icon-button mobile-only" @click="sidebarOpen = false">×</button>
       </div>
-      <button class="new-note" @click="createNote"><span>＋</span> New note <kbd>⌘ N</kbd></button>
+      <button class="new-note" :disabled="busy" @click="createNote"><span>＋</span> New note <kbd>⌘ N</kbd></button>
       <label class="search-box"><span>⌕</span><input v-model="search" placeholder="Search notes…" /></label>
       <nav class="note-nav">
         <template v-if="!loading && notes.length">
           <section v-if="groupedNotes.favorites.length">
             <p class="nav-label">Favorites</p>
-            <button v-for="note in groupedNotes.favorites" :key="note.id" :class="{ active: selected?.id === note.id }" @click="selectNote(note)"><span>{{ note.icon }}</span><span class="note-link-copy"><strong>{{ note.title || 'Untitled' }}</strong><small>{{ new Date(note.updated_at).toLocaleDateString('en-US', { day: 'numeric', month: 'short' }) }}</small></span></button>
+            <button v-for="note in groupedNotes.favorites" :key="note.id" :class="{ active: selected?.id === note.id }" :disabled="busy" @click="selectNote(note)"><span>{{ note.icon }}</span><span class="note-link-copy"><strong>{{ note.title || 'Untitled' }}</strong><small>{{ new Date(note.updated_at).toLocaleDateString('en-US', { day: 'numeric', month: 'short' }) }}</small></span></button>
           </section>
           <section>
             <p class="nav-label">{{ archived ? 'Archive' : 'Recent' }}</p>
-            <button v-for="note in groupedNotes.recent" :key="note.id" :class="{ active: selected?.id === note.id }" @click="selectNote(note)"><span>{{ note.icon }}</span><span class="note-link-copy"><strong>{{ note.title || 'Untitled' }}</strong><small>{{ new Date(note.updated_at).toLocaleDateString('en-US', { day: 'numeric', month: 'short' }) }}</small></span></button>
+            <button v-for="note in groupedNotes.recent" :key="note.id" :class="{ active: selected?.id === note.id }" :disabled="busy" @click="selectNote(note)"><span>{{ note.icon }}</span><span class="note-link-copy"><strong>{{ note.title || 'Untitled' }}</strong><small>{{ new Date(note.updated_at).toLocaleDateString('en-US', { day: 'numeric', month: 'short' }) }}</small></span></button>
           </section>
         </template>
         <p v-else-if="loading" class="empty-nav">Loading notes…</p>
@@ -154,7 +90,7 @@ onBeforeUnmount(() => { clearTimeout(saveTimer); clearTimeout(searchTimer) })
       </nav>
       <div class="sidebar-bottom">
         <button :class="{ active: archived }" @click="archived = !archived"><span>▱</span>{{ archived ? 'Back to notes' : 'Archive' }}</button>
-        <button @click="logout"><span>↗</span>Log out</button>
+        <button :disabled="busy" @click="logout"><span>↗</span>Log out</button>
       </div>
     </aside>
 
@@ -164,9 +100,10 @@ onBeforeUnmount(() => { clearTimeout(saveTimer); clearTimeout(searchTimer) })
         <div class="breadcrumbs"><span>Notes</span><b>/</b><strong>{{ selected?.title || 'Empty' }}</strong></div>
         <div v-if="selected" class="toolbar-actions">
           <span class="save-state"><i :class="{ saving: saveState !== 'Saved' }"></i>{{ saveState }}</span>
+          <button v-if="saveState === 'Save failed' || saveState === 'Recovered draft'" class="text-button" @click="flush">Retry save</button>
           <button class="icon-button" :class="{ starred: selected.is_favorite }" title="Favorite" @click="selected.is_favorite = !selected.is_favorite">☆</button>
-          <button class="text-button" @click="toggleArchive">{{ selected.is_archived ? 'Restore' : 'Archive' }}</button>
-          <button v-if="selected.is_archived" class="icon-button danger" title="Delete permanently" @click="removeNote">⌫</button>
+          <button class="text-button" :disabled="busy" @click="toggleArchive">{{ selected.is_archived ? 'Restore' : 'Archive' }}</button>
+          <button v-if="selected.is_archived" class="icon-button danger" title="Delete permanently" :disabled="busy" @click="removeNote">⌫</button>
         </div>
       </header>
 
@@ -177,7 +114,7 @@ onBeforeUnmount(() => { clearTimeout(saveTimer); clearTimeout(searchTimer) })
         <div class="document-meta"><span>Last edited {{ new Date(selected.updated_at).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' }) }}</span><span>•</span><span>{{ selected.content.length }} {{ selected.content.length === 1 ? 'block' : 'blocks' }}</span></div>
         <BlockEditor :key="selected.id" v-model:blocks="selected.content" />
       </article>
-      <div v-else-if="!loading" class="empty-document"><span>✦</span><h2>A space for your next idea</h2><p>Create a new note and start with one small sentence.</p><button class="primary-button" @click="createNote">Create note</button></div>
+      <div v-else-if="!loading" class="empty-document"><span>✦</span><h2>A space for your next idea</h2><p>Create a new note and start with one small sentence.</p><button class="primary-button" :disabled="busy" @click="createNote">Create note</button></div>
     </section>
   </main>
 </template>
