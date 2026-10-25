@@ -94,6 +94,22 @@ a { color: inherit; }
 .add-block { margin: 13px 0 0 29px; padding: 5px 8px; opacity: 0; border: 0; border-radius: 5px; background: transparent; color: #aaa49a; font-size: 12px; }
 .block-editor:hover .add-block { opacity: 1; }
 .add-block:hover { background: #efede8; }
+.editor-hint { margin: 0 0 16px 29px; color: var(--muted); font-size: 11px; line-height: 1.6; }
+.editor-hint kbd { padding: 1px 5px; border: 1px solid var(--line); border-radius: 4px; background: #fff; }
+.block:focus-within .block-handle, .block-handle:focus-visible, .add-block:focus-visible { opacity: 1; }
+.block-handle { cursor: pointer; letter-spacing: -2px; }
+.block-handle:hover { color: var(--ink); background: #efede8; border-radius: 4px; }
+.block-menu { position: absolute; z-index: 8; top: 100%; left: 29px; width: min(310px, calc(100vw - 58px)); padding: 6px; background: #fffefa; border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 14px 48px #27262122; }
+.block-menu-label { margin: 6px 8px 8px; color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .1em; }
+.block-menu button { display: flex; align-items: center; gap: 11px; width: 100%; border: 0; border-radius: 7px; padding: 8px; text-align: left; background: transparent; }
+.block-menu button.highlighted, .block-menu button:focus-visible { background: #f0ede6; }
+.block-menu-icon { display: grid; place-items: center; width: 34px; height: 34px; flex-shrink: 0; background: var(--paper); border: 1px solid var(--line); border-radius: 6px; font-size: 20px; }
+.block-menu strong, .block-menu small { display: block; }
+.block-menu strong { font-size: 13px; font-weight: 600; }
+.block-menu small { margin-top: 3px; color: var(--muted); font-size: 11px; }
+.block-menu-footer { margin: 7px 8px 3px; border-top: 1px solid var(--line); padding-top: 8px; color: var(--muted); font-size: 10px; }
+.block-menu-empty { padding: 8px; color: var(--muted); font-size: 12px; }
+@media (hover: none) { .block-handle, .add-block { opacity: 1; } }
 .empty-document { height: calc(100vh - 57px); display: grid; place-content: center; justify-items: center; text-align: center; color: var(--muted); }
 .empty-document > span { font: 50px 'Newsreader'; color: #c9a88e; }
 .empty-document h2 { margin: 12px 0 5px; color: var(--ink); font: 500 30px 'Newsreader'; }
