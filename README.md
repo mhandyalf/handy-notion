@@ -73,3 +73,38 @@ Roll out the backend and frontend together. Old frontend tabs cannot save agains
 
 Before deployment, manually check rapid edit → page switch, search during editing, browser back/forward, offline save/archive failures and retry, same-tab reload recovery, and logout with unsaved edits against a local/test account. Automated tests exercise the state controller, not browser navigation or the DOM. Verify a database backup and a restore into an isolated database before any production rollout or schema change; these checks do not validate production backups.
 
+### PostgreSQL integration checks (stage 4)
+
+The API integration suite uses the real router, auth middleware, repository, and PostgreSQL with separate HTTP clients. Only the external auth service is stubbed. It checks timestamp precision and monotonicity (including a future stored timestamp), stale/missing/invalid preconditions, ownership, archive versus edit, update versus update, and delete versus update. Concurrent races run ten times each and require exactly one successful mutation and one 409, then verify the stored result.
+
+Use a **disposable test database**, never a production DSN. The suite creates a randomly named schema and drops only that schema on cleanup; interruption can leave a `note_test_*` schema behind. The database user needs schema-creation permission. No new dependencies are required.
+
+```sh
+docker run --detach --rm --name handy-note-integration \
+  -e POSTGRES_USER=note_test -e POSTGRES_PASSWORD=note_test \
+  -e POSTGRES_DB=note_test -p 127.0.0.1:55439:5432 postgres:17-alpine
+# Wait until this succeeds:
+docker exec handy-note-integration pg_isready -U note_test -d note_test
+cd server
+NOTE_TEST_DATABASE_URL='postgres://note_test:note_test@127.0.0.1:55439/note_test?sslmode=disable' \
+  go test -race -count=1 ./...
+docker stop handy-note-integration
+```
+
+Without `NOTE_TEST_DATABASE_URL`, the integration test explicitly skips. CI provides a PostgreSQL 17 service and runs the suite with the race detector before image publication. This validates the API/database boundary, **not** two browser tabs or real `handy-auth` integration.
+
+### Authenticated two-tab release gate
+
+Run the app and real `handy-auth` against an isolated test database. Sign in as one test user and open the same note in two normal tabs, A and B. Use disposable notes and record the commit, browser, and pass/fail evidence for each step. Do not mark this gate complete based on API or controller tests alone.
+
+- [ ] **Concurrent editing:** let A save, then edit B's older copy. B receives 409, retains its draft, pauses autosave, and cannot switch notes or log out. A's content remains on the server. Repeat with edits near-simultaneously.
+- [ ] **Archive versus edit:** archive in A, then save the old copy in B. B conflicts without unarchiving or overwriting the server note.
+- [ ] **Delete versus edit:** delete in A, then save in B. B retains its draft; loading the missing server version fails without discarding it. Download remains available.
+- [ ] **Reload recovery:** before B's draft saves, take B offline and edit, save in A, then reload B in the same tab and reconnect. The recovered draft keeps its original base and conflicts rather than overwriting A.
+- [ ] **Download:** download B's local JSON and inspect it for the expected unsaved title/content before any discard or refresh. Treat this file as private note data.
+- [ ] **Server reload:** cancel the discard confirmation and verify the draft remains. Confirm it and verify the latest server version loads and conflict clears. Under network throttling, edit during the fetch and verify those edits are not discarded.
+- [ ] **Compatibility:** preserve drafts in old frontend tabs before refreshing; verify old clients receive 428 from the new backend. Release backend/frontend together; never run the new frontend against an old backend.
+- [ ] **Release operations:** verify backup/isolated restore, test offline failures and retry, browser navigation, and logout guards. Record explicit merge/deployment authorization separately.
+
+Stage 4 is not production-ready until the unchecked browser and operational gates are completed. No automatic merge, deployment, or production backup validation is performed by this suite.
+
