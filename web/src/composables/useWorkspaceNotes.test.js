@@ -169,3 +169,96 @@ test('storage failure does not stop server saving', async (t) => {
   assert.equal(await state.flush(), true)
   assert.equal(state.dirty.value, false)
 })
+
+test('two tabs cannot overwrite a newer save and conflict pauses retries and navigation', async (t) => {
+  let server = note('a')
+  let writes = 0
+  const updateNote = async (id, value) => {
+    writes++
+    if (value.expected_updated_at !== server.updated_at) {
+      throw Object.assign(new Error('note has changed'), { status: 409 })
+    }
+    server = { ...server, ...value, updated_at: '2026-01-02T00:00:00Z' }
+    return server
+  }
+  const first = setup(t, { updateNote }).state
+  const second = setup(t, { updateNote }).state
+  await first.initialize('a')
+  await second.initialize('a')
+  first.selected.value.title = 'server winner'
+  assert.equal(await first.flush(), true)
+  second.selected.value.title = 'keep local'
+  assert.equal(await second.flush(), false)
+  assert.equal(second.conflict.value, true)
+  assert.equal(second.saveState.value, 'Conflict')
+  second.selected.value.title = 'still editable'
+  assert.equal(await second.selectNote(note('b')), false)
+  assert.equal(writes, 2)
+  assert.equal(server.title, 'server winner')
+  assert.equal(second.selected.value.title, 'still editable')
+})
+
+test('serialized saves advance the base even when edits arrive during the request', async (t) => {
+  const pending = deferred()
+  const bases = []
+  const { state } = setup(t, { updateNote: async (id, value) => {
+    bases.push(value.expected_updated_at)
+    if (bases.length === 1) await pending.promise
+    return { ...note(id), ...value, updated_at: `version-${bases.length}` }
+  } })
+  await state.initialize('a')
+  state.selected.value.title = 'first'
+  const saving = state.flush()
+  state.selected.value.title = 'second'
+  pending.resolve()
+  assert.equal(await saving, true)
+  assert.deepEqual(bases, ['2026-01-01', 'version-1'])
+  assert.equal(state.selected.value.updated_at, 'version-2')
+})
+
+test('recovery retains the original base rather than adopting a newer server version', async (t) => {
+  const draft = { ...note('a'), title: 'old local draft' }
+  const storage = { getItem: () => JSON.stringify({ a: draft }), setItem() {}, removeItem() {} }
+  let base
+  const state = useWorkspaceNotes({ getNote: async () => ({ ...note('a'), updated_at: 'new-server-version' }),
+    updateNote: async (id, value) => { base = value.expected_updated_at; throw Object.assign(new Error('stale'), { status: 409 }) },
+  }, { storage, recoveryKey: 'user', delay: 60_000 })
+  t.after(() => state.dispose())
+  await state.selectNote(note('a'))
+  assert.equal(await state.flush(), false)
+  assert.equal(base, draft.updated_at)
+  assert.equal(state.selected.value.title, draft.title)
+})
+
+test('loading server version clears conflict only after success and does not discard intervening edits', async (t) => {
+  const pending = deferred()
+  let reads = 0
+  const { state } = setup(t, { getNote: () => ++reads === 1 ? Promise.resolve(note('a')) : pending.promise,
+    updateNote: async () => { throw Object.assign(new Error('conflict'), { status: 409 }) } })
+  await state.initialize('a')
+  state.selected.value.title = 'local'
+  await state.flush()
+  const loading = state.reloadServerNote()
+  state.selected.value.title = 'new local edit'
+  pending.resolve({ ...note('a'), title: 'server', updated_at: 'new' })
+  assert.equal(await loading, false)
+  assert.equal(state.selected.value.title, 'new local edit')
+  assert.equal(state.conflict.value, true)
+  assert.equal(await state.reloadServerNote(), true)
+  assert.equal(state.selected.value.title, 'server')
+  assert.equal(state.conflict.value, false)
+  assert.equal(state.dirty.value, false)
+})
+
+test('delete sends its base and preserves the note when another tab changed it', async (t) => {
+  let base
+  const { state } = setup(t, { deleteNote: async (id, version) => {
+    base = version
+    throw Object.assign(new Error('conflict'), { status: 409 })
+  } })
+  await state.initialize('a')
+  assert.equal(await state.removeNote(), false)
+  assert.equal(base, '2026-01-01')
+  assert.equal(state.conflict.value, true)
+  assert.equal(state.selected.value.id, 'a')
+})

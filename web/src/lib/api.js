@@ -15,7 +15,12 @@ async function request(base, path, options = {}) {
   }
   if (response.status === 204) return null
   const data = await response.json().catch(() => ({}))
-  if (!response.ok) throw new Error(data.error || 'Something went wrong. Please try again.')
+  if (!response.ok) {
+    const error = new Error(data.error || 'Something went wrong. Please try again.')
+    error.status = response.status
+    error.code = data.code
+    throw error
+  }
   return data
 }
 
@@ -26,5 +31,5 @@ export const api = {
   getNote: (id) => request(notesBase, `/api/notes/${id}`),
   createNote: () => request(notesBase, '/api/notes', { method: 'POST', body: JSON.stringify({ content: [{ id: crypto.randomUUID(), type: 'text', text: '' }] }) }),
   updateNote: (id, payload) => request(notesBase, `/api/notes/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),
-  deleteNote: (id) => request(notesBase, `/api/notes/${id}`, { method: 'DELETE' }),
+  deleteNote: (id, version) => request(notesBase, `/api/notes/${id}?expected_updated_at=${encodeURIComponent(version)}`, { method: 'DELETE' }),
 }
