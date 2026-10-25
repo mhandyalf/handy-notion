@@ -71,11 +71,11 @@ Every push to `main` (including a merged pull request) runs tests, publishes bot
 
 Repository secrets `VPS_DEPLOY_KEY` and `VPS_KNOWN_HOSTS` contain a dedicated private deploy key and the verified host key. Its public key must have `restrict,command="/usr/local/sbin/handy-notion-ssh-deploy"` in root's authorized_keys. Install `deploy/ssh-deploy.sh` at that path and `deploy/auto-update.sh` at `/usr/local/sbin/handy-notion-auto-update`, both root-owned, mode 0755. The forced command accepts only `deploy <full commit SHA>` and does not permit an interactive shell or forwarding. This key still invokes a privileged deployment script: keep it dedicated and rotate it when needed.
 
-Disable the polling timer with `systemctl disable --now handy-notion-update.timer` once direct deployment is configured. Do not run polling alongside direct deployments: mutable `latest` tags could otherwise redeploy a superseded commit. Concurrent workflows are serialized and superseded commits are skipped before SSH deployment. The host deployment lock waits for an existing deployment instead of reporting a false success.
+The polling timer source has been removed. Remove any previously installed host timer with the commands below. Do not run polling alongside direct deployments: mutable `latest` tags could otherwise redeploy a superseded commit. Concurrent workflows are serialized and superseded commits are skipped before SSH deployment. The host deployment lock waits for an existing deployment instead of reporting a false success.
 
 ### Legacy VPS automatic image updates
 
-The VPS uses `/etc/systemd/system/handy-notion-update.timer` to check Docker Hub approximately every five minutes. Its service executes `/usr/local/sbin/handy-notion-auto-update` (source: `deploy/auto-update.sh`), targeting only `api` and `web` in `/myproject/handy-notion/docker-compose.prod.yml`. Other applications and the PostgreSQL container are not restarted.
+Older installations used `/etc/systemd/system/handy-notion-update.timer` to check Docker Hub approximately every five minutes. Remove that timer when migrating to direct deployment. The retained service executes `/usr/local/sbin/handy-notion-auto-update` (source: `deploy/auto-update.sh`), targeting only `api` and `web` in `/myproject/handy-notion/docker-compose.prod.yml`. Other applications and the PostgreSQL container are not restarted.
 
 Only `main` publishes production images. Both API and web images must carry the same 40-character `org.opencontainers.image.revision`; unlabelled or mismatched images are skipped. The deployment pins the exact downloaded image IDs rather than mutable tags. Production builds use same-origin API/auth URLs so both configured domains can work. Feature-branch pushes do not deploy.
 
@@ -86,13 +86,15 @@ Deployment recreates only the two Notes containers, causing a brief interruption
 Host commands:
 
 ```sh
+systemctl disable --now handy-notion-update.timer
+rm -f /etc/systemd/system/handy-notion-update.timer
+systemctl daemon-reload
 systemctl list-timers --all handy-notion-update.timer
 journalctl -u handy-notion-update.service -n 80 --no-pager
 systemctl start handy-notion-update.service # Check now
-systemctl disable --now handy-notion-update.timer # Pause future checks
 ```
 
-Pausing the timer does not interrupt an update already running. Unit files and script are versioned under `deploy/`; changes there must be installed on the host explicitly. The timer does not pull Git changes or update itself.
+Removing the timer does not interrupt an update already running. The service unit and scripts are versioned under `deploy/`; changes there must be installed on the host explicitly.
 
 Open a note and choose **Share → Enable public link**, then **Copy link**. The page at `/s/<random-token>` is readable without login. Anyone who receives or forwards this link can read the note; it is not a private invitation, searchable public directory, or collaborative editor.
 
