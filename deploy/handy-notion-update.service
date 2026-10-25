@@ -1,0 +1,11 @@
+[Unit]
+Description=Update only Handy Notes API and web from matching published images
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/handy-notion-auto-update
+TimeoutStartSec=15min
+UMask=0077

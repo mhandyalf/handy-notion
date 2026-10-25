@@ -1,0 +1,11 @@
+[Unit]
+Description=Check Handy Notes images every five minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitInactiveSec=5min
+RandomizedDelaySec=30
+Unit=handy-notion-update.service
+
+[Install]
+WantedBy=timers.target

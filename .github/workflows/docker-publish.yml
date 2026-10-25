@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
 
 env:
-  PUBLIC_URL: https://notes.gembolspwmanager.online
+  PUBLIC_URL: ''
   API_IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/handy-notion-api
   WEB_IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/handy-notion-web
 
@@ -39,6 +39,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+      - name: Test deployment decisions
+        working-directory: .
+        run: |
+          bash -n deploy/auto-update.sh
+          python3 deploy/test_auto_update.py
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
@@ -74,7 +79,7 @@ jobs:
 
   publish:
     needs: [backend-checks, frontend-checks]
-    if: github.event_name != 'pull_request'
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -97,6 +102,8 @@ jobs:
         with:
           context: ./server
           push: true
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
           tags: |
             ${{ env.API_IMAGE }}:latest
             ${{ env.API_IMAGE }}:${{ github.sha }}
@@ -106,6 +113,8 @@ jobs:
         with:
           context: ./web
           push: true
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
           build-args: |
             VITE_API_URL=${{ env.PUBLIC_URL }}
             VITE_AUTH_URL=${{ env.PUBLIC_URL }}
