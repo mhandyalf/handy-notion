@@ -1,4 +1,4 @@
-name: Publish Docker images
+name: Test, publish and deploy production
 
 on:
   push:
@@ -6,6 +6,10 @@ on:
       - main
   pull_request:
   workflow_dispatch:
+
+concurrency:
+  group: handy-notion-${{ github.ref }}
+  cancel-in-progress: false
 
 env:
   PUBLIC_URL: ''
@@ -44,6 +48,7 @@ jobs:
         run: |
           bash -n deploy/auto-update.sh
           python3 deploy/test_auto_update.py
+          bash -n deploy/ssh-deploy.sh
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
@@ -121,3 +126,43 @@ jobs:
           tags: |
             ${{ env.WEB_IMAGE }}:latest
             ${{ env.WEB_IMAGE }}:${{ github.sha }}
+
+  deploy:
+    needs: publish
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Deploy exact published commit and check health
+        env:
+          DEPLOY_KEY: ${{ secrets.VPS_DEPLOY_KEY }}
+          KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # A newer push can supersede this run while it is building.
+          current=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')
+          if [[ "$current" != "$GITHUB_SHA" ]]; then
+            echo "Skipping superseded commit $GITHUB_SHA; main is $current."
+            exit 0
+          fi
+          umask 077
+          key=$(mktemp)
+          hosts=$(mktemp)
+          trap 'rm -f "$key" "$hosts"' EXIT
+          printf '%s\n' "$DEPLOY_KEY" > "$key"
+          printf '%s\n' "$KNOWN_HOSTS" > "$hosts"
+          ssh -T -i "$key" -o IdentitiesOnly=yes -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$hosts" \
+            -o ConnectTimeout=15 -o ServerAliveInterval=30 \
+            root@38.47.176.19 "deploy $GITHUB_SHA"
+      - name: Verify public routing
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --retry 3 https://notes.handyworks.site/ -o /dev/null
+          code=$(curl --silent --show-error -o /tmp/public-response.json -w '%{http_code}' https://notes.handyworks.site/api/public/notes/deployment-check)
+          test "$code" = 404
+          python3 -c 'import json; assert json.load(open("/tmp/public-response.json")) == {"error": "note not found"}'

@@ -51,13 +51,38 @@ elif args[0] == 'compose':
             target = root / 'update.sh'
             target.write_text(script)
             log = root / 'calls'
-            result = subprocess.run(['bash', str(target)], env={**os.environ, 'TEST_MODE': mode, 'TEST_LOG': str(log)}, capture_output=True, text=True)
+            arguments = ['bash', str(target)]
+            if self.requested_target is not None:
+                arguments.append(self.requested_target)
+            result = subprocess.run(arguments, env={**os.environ, 'TEST_MODE': mode, 'TEST_LOG': str(log)}, capture_output=True, text=True)
             return result, log.read_text(), list((root / 'backups').glob('*.sql.gz'))
 
     def test_no_change(self):
         result, calls, _ = self.run_update('current')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertNotIn('compose ', calls)
+
+    requested_target = None
+
+    def test_exact_commit_is_pulled(self):
+        self.requested_target = 'a' * 40
+        result, calls, _ = self.run_update('success')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('pull mhandyalf/handy-notion-api:' + self.requested_target, calls)
+        self.assertIn('pull mhandyalf/handy-notion-web:' + self.requested_target, calls)
+
+    def test_wrong_requested_revision_fails(self):
+        self.requested_target = 'b' * 40
+        result, calls, _ = self.run_update('success')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn('compose ', calls)
+        self.assertNotIn('exec postgres', calls)
+
+    def test_ssh_command_rejects_shell_and_invalid_revisions(self):
+        script = Path(__file__).with_name('ssh-deploy.sh')
+        for command in ['', 'deploy latest', 'deploy ' + 'a' * 40 + '; id', 'id']:
+            result = subprocess.run(['bash', str(script)], env={**os.environ, 'SSH_ORIGINAL_COMMAND': command}, capture_output=True)
+            self.assertNotEqual(result.returncode, 0)
 
     def test_unpaired_or_unlabelled_images_are_not_deployed(self):
         for mode in ['unlabelled', 'mismatch']:

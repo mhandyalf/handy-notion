@@ -65,7 +65,15 @@ Unsaved drafts are copied to user-scoped `sessionStorage` when available. Reload
 
 ## Public read-only sharing
 
-### VPS automatic image updates
+### Immediate production deployment
+
+Every push to `main` (including a merged pull request) runs tests, publishes both images, then immediately deploys that exact commit over SSH. There is no polling delay. The `deploy` job waits for the host script and health checks, then checks public web/API routing. A failed deployment fails GitHub Actions. Builds must still finish before production changes; existing browser tabs need a refresh.
+
+Repository secrets `VPS_DEPLOY_KEY` and `VPS_KNOWN_HOSTS` contain a dedicated private deploy key and the verified host key. Its public key must have `restrict,command="/usr/local/sbin/handy-notion-ssh-deploy"` in root's authorized_keys. Install `deploy/ssh-deploy.sh` at that path and `deploy/auto-update.sh` at `/usr/local/sbin/handy-notion-auto-update`, both root-owned, mode 0755. The forced command accepts only `deploy <full commit SHA>` and does not permit an interactive shell or forwarding. This key still invokes a privileged deployment script: keep it dedicated and rotate it when needed.
+
+Disable the polling timer with `systemctl disable --now handy-notion-update.timer` once direct deployment is configured. Do not run polling alongside direct deployments: mutable `latest` tags could otherwise redeploy a superseded commit. Concurrent workflows are serialized and superseded commits are skipped before SSH deployment. The host deployment lock waits for an existing deployment instead of reporting a false success.
+
+### Legacy VPS automatic image updates
 
 The VPS uses `/etc/systemd/system/handy-notion-update.timer` to check Docker Hub approximately every five minutes. Its service executes `/usr/local/sbin/handy-notion-auto-update` (source: `deploy/auto-update.sh`), targeting only `api` and `web` in `/myproject/handy-notion/docker-compose.prod.yml`. Other applications and the PostgreSQL container are not restarted.
 
