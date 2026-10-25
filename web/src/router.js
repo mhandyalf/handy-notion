@@ -3,10 +3,12 @@ import { auth } from './lib/auth.js'
 import LoginView from './views/LoginView.vue'
 import RegisterView from './views/RegisterView.vue'
 import WorkspaceView from './views/WorkspaceView.vue'
+import PublicNoteView from './views/PublicNoteView.vue'
 
 const router = createRouter({
   history: createWebHistory(),
   routes: [
+    { path: '/s/:token', component: PublicNoteView },
     { path: '/', redirect: '/notes' },
     { path: '/login', component: LoginView, meta: { guest: true } },
     { path: '/register', component: RegisterView, meta: { guest: true } },

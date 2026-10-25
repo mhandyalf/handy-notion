@@ -61,7 +61,7 @@ func TestPostgresNoteConcurrency(t *testing.T) {
 	}
 	pool.SetMaxOpenConns(8)
 	t.Cleanup(func() { _ = pool.Close() })
-	if err := isolated.AutoMigrate(&model.Note{}); err != nil {
+	if err := isolated.AutoMigrate(&model.Note{}, &model.NoteShare{}); err != nil {
 		t.Fatal(err)
 	}
 	owner, other := uuid.NewString(), uuid.NewString()
@@ -90,9 +90,10 @@ func TestPostgresNoteConcurrency(t *testing.T) {
 	t.Cleanup(a.CloseIdleConnections)
 	t.Cleanup(b.CloseIdleConnections)
 	type result struct {
-		status int
-		body   []byte
-		err    error
+		status  int
+		body    []byte
+		err     error
+		headers http.Header
 	}
 	request := func(client *http.Client, token, method, path string, body any) result {
 		var data []byte
@@ -108,14 +109,16 @@ func TestPostgresNoteConcurrency(t *testing.T) {
 			return result{err: e}
 		}
 		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Authorization", "Bearer "+token)
+		if token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
 		res, e := client.Do(req)
 		if e != nil {
 			return result{err: e}
 		}
 		defer res.Body.Close()
 		data, e = io.ReadAll(res.Body)
-		return result{res.StatusCode, data, e}
+		return result{res.StatusCode, data, e, res.Header}
 	}
 	check := func(t *testing.T, res result, status int) {
 		t.Helper()
@@ -131,11 +134,19 @@ func TestPostgresNoteConcurrency(t *testing.T) {
 	}
 	decode := func(t *testing.T, res result) model.Note {
 		t.Helper()
-		var note model.Note
-		if err := json.Unmarshal(res.body, &note); err != nil {
+		// model.JSON is a database value type, so decode API content as raw JSON.
+		var payload struct {
+			ID         uuid.UUID       `json:"id"`
+			Title      string          `json:"title"`
+			Icon       string          `json:"icon"`
+			Content    json.RawMessage `json:"content"`
+			UpdatedAt  time.Time       `json:"updated_at"`
+			IsArchived bool            `json:"is_archived"`
+		}
+		if err := json.Unmarshal(res.body, &payload); err != nil {
 			t.Fatal(err)
 		}
-		return note
+		return model.Note{ID: payload.ID, Title: payload.Title, Icon: payload.Icon, Content: model.JSON(payload.Content), UpdatedAt: payload.UpdatedAt, IsArchived: payload.IsArchived}
 	}
 	create := func(t *testing.T) model.Note {
 		t.Helper()
@@ -205,6 +216,144 @@ func TestPostgresNoteConcurrency(t *testing.T) {
 		if !stored.IsArchived || stored.Title != note.Title || !stored.UpdatedAt.Equal(decode(t, archived).UpdatedAt) {
 			t.Fatal("stale edit modified the archived note")
 		}
+	})
+	t.Run("public read-only sharing", func(t *testing.T) {
+		note := create(t)
+		path := "/api/notes/" + note.ID.String()
+		share := path + "/share"
+		tokenOf := func(res result) string {
+			t.Helper()
+			check(t, res, 200)
+			var payload struct {
+				Token string `json:"token"`
+			}
+			if err := json.Unmarshal(res.body, &payload); err != nil {
+				t.Fatal(err)
+			}
+			if len(payload.Token) != 64 {
+				t.Fatalf("invalid token: %s", res.body)
+			}
+			return payload.Token
+		}
+		public := func(token string, status int) result {
+			t.Helper()
+			res := request(a, "", "GET", "/api/public/notes/"+token, nil)
+			check(t, res, status)
+			for key, value := range map[string]string{"Cache-Control": "no-store", "Referrer-Policy": "no-referrer", "X-Robots-Tag": "noindex,nofollow,noarchive"} {
+				if res.headers.Get(key) != value {
+					t.Fatalf("%s = %q", key, res.headers.Get(key))
+				}
+			}
+			return res
+		}
+		check(t, request(a, "", "GET", share, nil), 401)
+		status := request(a, "tab-a", "GET", share, nil)
+		check(t, status, 200)
+		if string(status.body) != `{"token":null}` {
+			t.Fatalf("initial status: %s", status.body)
+		}
+		// Concurrent enables must all observe a single token.
+		start := make(chan struct{})
+		results := make(chan result, 8)
+		for i := 0; i < 8; i++ {
+			go func() { <-start; results <- request(b, "tab-b", "POST", share, nil) }()
+		}
+		close(start)
+		token := tokenOf(<-results)
+		for i := 1; i < 8; i++ {
+			if tokenOf(<-results) != token {
+				t.Fatal("concurrent enables rotated token")
+			}
+		}
+		if tokenOf(request(a, "tab-a", "GET", share, nil)) != token {
+			t.Fatal("status differs")
+		}
+		for _, method := range []string{"GET", "POST", "DELETE"} {
+			unowned := request(b, "other-user", method, share, nil)
+			missing := request(b, "other-user", method, "/api/notes/"+uuid.NewString()+"/share", nil)
+			check(t, unowned, 404)
+			check(t, missing, 404)
+			if !bytes.Equal(unowned.body, missing.body) {
+				t.Fatal("ownership disclosure")
+			}
+		}
+		read := request(a, "tab-a", "GET", path, nil)
+		check(t, read, 200)
+		if !decode(t, read).UpdatedAt.Equal(note.UpdatedAt) {
+			t.Fatal("share modified note version")
+		}
+		if bytes.Contains(read.body, []byte(token)) || bytes.Contains(read.body, []byte(`"token"`)) {
+			t.Fatal("private note leaked token")
+		}
+		list := request(a, "tab-a", "GET", "/api/notes", nil)
+		check(t, list, 200)
+		if bytes.Contains(list.body, []byte(token)) {
+			t.Fatal("list leaked token")
+		}
+		res := public(token, 200)
+		var payload map[string]json.RawMessage
+		if err := json.Unmarshal(res.body, &payload); err != nil {
+			t.Fatal(err)
+		}
+		if len(payload) != 4 {
+			t.Fatalf("public metadata leak: %s", res.body)
+		}
+		for _, key := range []string{"title", "icon", "content", "updated_at"} {
+			if _, ok := payload[key]; !ok {
+				t.Fatalf("missing %s", key)
+			}
+		}
+		saved := request(a, "tab-a", "PUT", path, map[string]any{"expected_updated_at": version(note), "title": "Latest shared title", "content": []any{map[string]any{"type": "paragraph", "content": "latest text"}}, "token": "attacker"})
+		check(t, saved, 200)
+		note = decode(t, saved)
+		res = public(token, 200)
+		if !bytes.Contains(res.body, []byte("latest text")) || !bytes.Contains(res.body, []byte("Latest shared title")) || !decode(t, res).UpdatedAt.Equal(note.UpdatedAt) {
+			t.Fatal("public response is not latest save")
+		}
+		if tokenOf(request(a, "tab-a", "GET", share, nil)) != token {
+			t.Fatal("autosave changed share")
+		}
+		for _, method := range []string{"POST", "PUT", "PATCH", "DELETE"} {
+			res := request(a, "", method, "/api/public/notes/"+token, map[string]any{"title": "attack"})
+			check(t, res, 404)
+			if res.headers.Get("Cache-Control") != "no-store" {
+				t.Fatal("missing public error headers")
+			}
+		}
+		bad := public("bad", 404)
+		if !bytes.Equal(bad.body, public(strings.Repeat("0", 64), 404).body) {
+			t.Fatal("token existence disclosure")
+		}
+		check(t, request(a, "tab-a", "DELETE", share, nil), 204)
+		check(t, request(a, "tab-a", "DELETE", share, nil), 204)
+		if !bytes.Equal(bad.body, public(token, 404).body) {
+			t.Fatal("revoked disclosure")
+		}
+		newToken := tokenOf(request(a, "tab-a", "POST", share, nil))
+		if newToken == token {
+			t.Fatal("re-enable reused token")
+		}
+		public(token, 404)
+		public(newToken, 200)
+		read = request(a, "tab-a", "GET", path, nil)
+		check(t, read, 200)
+		if !decode(t, read).UpdatedAt.Equal(note.UpdatedAt) {
+			t.Fatal("revoke/re-enable modified note version")
+		}
+		archived := request(a, "tab-a", "PUT", path, map[string]any{"expected_updated_at": version(note), "is_archived": true})
+		check(t, archived, 200)
+		note = decode(t, archived)
+		public(newToken, 404)
+		restored := request(a, "tab-a", "PUT", path, map[string]any{"expected_updated_at": version(note), "is_archived": false})
+		check(t, restored, 200)
+		note = decode(t, restored)
+		public(newToken, 200)
+		check(t, request(a, "tab-a", "DELETE", path+"?expected_updated_at="+url.QueryEscape(version(note)), nil), 204)
+		public(newToken, 404)
+		for _, method := range []string{"GET", "POST", "DELETE"} {
+			check(t, request(a, "tab-a", method, share, nil), 404)
+		}
+		check(t, request(a, "", "GET", "/api/public/notes", nil), 404)
 	})
 	for _, deleteSecond := range []bool{false, true} {
 		t.Run(fmt.Sprintf("concurrent mutations delete=%v", deleteSecond), func(t *testing.T) {

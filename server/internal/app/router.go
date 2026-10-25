@@ -26,7 +26,7 @@ func NewRouterFromEnv() (*gin.Engine, error) {
 	if err != nil {
 		return nil, fmt.Errorf("connect to PostgreSQL: %w", err)
 	}
-	if err := db.AutoMigrate(&model.Note{}); err != nil {
+	if err := db.AutoMigrate(&model.Note{}, &model.NoteShare{}); err != nil {
 		return nil, fmt.Errorf("migrate notes: %w", err)
 	}
 	authURL := os.Getenv("AUTH_SERVICE_URL")
@@ -38,10 +38,16 @@ func NewRouterFromEnv() (*gin.Engine, error) {
 
 func NewRouter(db *gorm.DB, authURL string, origins []string) *gin.Engine {
 	r := gin.Default()
+	r.Use(handler.PublicNoteHeaders())
 	r.Use(cors.New(cors.Config{AllowOrigins: origins, AllowMethods: []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"}, AllowHeaders: []string{"Origin", "Content-Type", "Authorization", "Accept"}, MaxAge: 12 * time.Hour}))
 	r.GET("/health", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ok"}) })
 	notes := handler.NewNoteHandler(repository.NewNoteRepository(db))
+	shares := handler.NewNoteShareHandler(repository.NewNoteShareRepository(db))
+	r.GET("/api/public/notes/:token", shares.Public)
 	api := r.Group("/api", middleware.HandyAuth(authURL, nil))
+	api.GET("/notes/:id/share", shares.Status)
+	api.POST("/notes/:id/share", shares.Enable)
+	api.DELETE("/notes/:id/share", shares.Revoke)
 	api.GET("/notes", notes.List)
 	api.POST("/notes", notes.Create)
 	api.GET("/notes/:id", notes.Get)
