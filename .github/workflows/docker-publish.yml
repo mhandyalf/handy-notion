@@ -15,6 +15,22 @@ env:
 jobs:
   backend-checks:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: note_test
+          POSTGRES_PASSWORD: note_test
+          POSTGRES_DB: note_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U note_test -d note_test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      NOTE_TEST_DATABASE_URL: postgres://note_test:note_test@localhost:5432/note_test?sslmode=disable
     permissions:
       contents: read
     defaults:
@@ -29,7 +45,7 @@ jobs:
           go-version-file: server/go.mod
           cache-dependency-path: server/go.sum
       - name: Test
-        run: go test ./...
+        run: go test -race ./...
       - name: Vet
         run: go vet ./...
 
